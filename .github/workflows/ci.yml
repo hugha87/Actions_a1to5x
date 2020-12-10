@@ -3,12 +3,15 @@ name: a1to5x
 on:
   workflow_dispatch:
      inputs:
-       zipname:
-         description: 'ZIP NAME(Example: crDroidAndroid-11.0-20201126-tissot-v7.0)'
-         required: false
        filelink:
          description: 'File link'
-         required: true
+         required: false
+       zipname:
+         description: 'ROM NAME(Example: crDroidAndroid-11.0-20201126-tissot-v7.0)'
+         required: false
+       gdrive:
+         description: 'test(You need to fill in ROM NAME)'
+         required: false
 
 jobs:
   a1to5x:
@@ -19,12 +22,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Initialization environment
+      - id: init
+        name: Initialization environment
         run: |
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install git openjdk-8-jdk wget curl rsync aria2 python python3 unzip device-tree-compiler brotli simg2img img2simg
           pip3 install protobuf
           pip install brotli
+          if [[ ! -z "$(echo ${{ github.event.inputs.gdrive }} | grep "download")" ]]; then
+              id=$(echo ${{ github.event.inputs.gdrive }} | sed 's#https://drive.google.com/*?id=##' | sed 's#&export=download##')
+                  echo "id: $id
+                  echo "::set-output name=id::$id
+          else
+                  id=$(echo ${{ github.event.inputs.gdrive }} | sed 's#https://drive.google.com/file/d/##' | sed 's#/view*##')
+                  echo "id: $id"
+                  echo "::set-output name=id::$id
+          fi
 
       - id: var
         name: Download
@@ -41,14 +54,24 @@ jobs:
                   echo "::set-output name=zipname::$zipname"
               fi
           else
-              if [[ ! -z "${{ github.event.inputs.zipname }}" ]]; then
-                  echo "::set-output name=zipname::${{ github.event.inputs.zipname }}"
-              else
-                  echo "The link does not exist."
-                  exit 1
+              if [[ ! -z "${{ github.event.inputs.gdrive }}" ]]; then
+                  if [[ ! -z "$(echo ${{ github.event.inputs.gdrive }} | grep "download")" ]]; then
+                      wget --load-cookies /tmp/cookies.txt "https://drive.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://drive.google.com/uc?export=download&id=${{ steps.init.outputs.id }}' -O- | sed -rn 's/.confirm=([0-9A-Za-z_]+)./\1\n/p')&id=${{ steps.init.outputs.id }}" -O ${{ github.event.inputs.zipname }} && rm -rf /tmp/cookies.txt
+                  else
+                      wget --load-cookies /tmp/cookies.txt "https://drive.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://drive.google.com/uc?export=download&id=${{ steps.init.outputs.id }}' -O- | sed -rn 's/.confirm=([0-9A-Za-z_]+)./\1\n/p')&id=${{ steps.init.outputs.id }}" -O ${{ github.event.inputs.zipname }} && rm -rf /tmp/cookies.txt
+                  fi
+                  if [[ ! -z "${{ github.event.inputs.zipname }}" ]]; then
+                      aria2c -x16 -j$(nproc) -o "${{ github.event.inputs.zipname }}" ${{ github.event.inputs.filelink }} || wget ${{ github.event.inputs.filelink }} -O "${{ github.event.inputs.zipname }}"
+                      echo "::set-output name=zipname::${{ github.event.inputs.zipname }}"
+                  else
+                      aria2c -x16 -j$(nproc) ${{ github.event.inputs.filelink }} || wget ${{ github.event.inputs.filelink }}
+                      NAME="$(ls -lS *.zip | head -1 | awk '{print $9}')"
+                      zipname=${NAME%.*}
+                      echo "::set-output name=zipname::$zipname"
+                  fi
               fi
           fi
-          ls
+          ls -al
 
       - name: Payload Extractor
         run: |
